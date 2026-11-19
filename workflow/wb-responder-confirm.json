@@ -1,0 +1,579 @@
+{
+  "id": "pooBWAs7FVs1B8E1",
+  "name": "WB Responder Confirm",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-11-13T16:59:45.446Z",
+  "updatedAt": "2026-11-13T21:08:06.371Z",
+  "isArchived": false,
+  "versionId": "2cceaf61-0d12-4a93-a5fa-82bb092877b1",
+  "versionCounter": 14,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "wh2",
+      "name": "Webhook",
+      "webhookId": "a6a8b406-0b17-4baf-9905-6aea344b01dd",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        32,
+        304
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "wb-responder-confirm",
+        "options": {}
+      }
+    },
+    {
+      "id": "dry2",
+      "name": "Dry Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        304
+      ],
+      "parameters": {
+        "jsCode": "// Node: Dry Log v2 (code, runOnceForAllItems) — WF2 stateless confirm\n// Input: { body: { answer, csv } } — csv is the drafts CSV text from the confirm request.\nvar src = $(\"Webhook\").first().json; var body = src.body || src;\nvar csvText = String(body.csv || \"\");\nvar lines = csvText.trim().split(\"\\n\");\nvar out = [];\nvar ts = new Date().toISOString();\nvar rows = [\"reviewId,draft,sent,dry_run,timestamp\"];\nvar empty = 0;\nfor (var i = 1; i < lines.length; i++) {\n  // format: \"reviewId\",\"text\",rating,\"draftAnswer\"\n  var m = lines[i].match(/^\"([^\"]*)\",\"((?:[^\"]|\"\")*)\",(\\d+),\"((?:[^\"]|\"\")*)\"$/);\n  if (!m) continue;\n  var draft = m[4].replace(/\"\"/g, '\"');\n  if (!draft.trim()) { empty++; continue; }\n  rows.push('\"' + m[1] + '\",\"' + draft.replace(/\"/g, '\"\"') + '\",false,true,' + ts);\n  out.push({ json: { reviewId: m[1], draftAnswer: draft } });\n}\nreturn [{ json: {\n  csv: rows.join(\"\\n\"),\n  total: out.length,\n  skippedEmpty: empty,\n  sent: 0,\n  dry_run: true,\n  mode: \"dry_run (WB_API_TOKEN not set)\"\n}}];\n"
+      }
+    },
+    {
+      "id": "cnv2",
+      "name": "Convert Log",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        304
+      ],
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "wr2",
+      "name": "Write Log CSV",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        304
+      ],
+      "parameters": {
+        "fileName": "C:\\Users\\User\\Projects\\wb-reviews-demo\\data\\responder_log.csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "end2",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1840,
+        304
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "chk2",
+      "name": "Check Answer",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Check Answer (code, runOnceForAllItems) — replaces brittle IF for webhook body variants.\nvar body = $input.first().json.body;\nif (body === undefined || body === null) body = $input.first().json;\nvar answer = \"\";\ntry { answer = String(typeof body === \"string\" ? JSON.parse(body).answer : body.answer || \"\"); } catch (e) { answer = String(body || \"\"); }\nanswer = answer.toLowerCase().trim();\nif (answer.indexOf(\"да\") >= 0 || answer.indexOf(\"yes\") >= 0) {\n  return [{ json: { approved: true, answer: answer } }];\n}\nreturn [];\n"
+      }
+    },
+    {
+      "id": "telegram result3",
+      "name": "Telegram Result",
+      "webhookId": "0cbd8e59-1fd3-42f5-8e47-ea715509f8e5",
+      "disabled": true,
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1620,
+        300
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_HOME_CHANNEL}}",
+        "text": "=WB Responder итог: {{ $('Dry Log').first().json.mode }} — всего {{ $('Dry Log').first().json.total }}, отправлено {{ $('Dry Log').first().json.sent }}.",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "RR5DeKtrRuDsKDe1"
+        }
+      }
+    },
+    {
+      "id": "mode-router-000001",
+      "name": "Mode Router",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Mode Router — triple gate for real-send (default: dry).\n// real = (mode === \"real\") AND (confirm === true) AND ($env.WB_ALLOW_REAL === \"1\"); otherwise dry.\nvar src = $(\"Webhook\").first().json;\nvar body = src.body || src;\nif (typeof body === \"string\") { try { body = JSON.parse(body); } catch (e) { body = {}; } }\nvar mode = String(body.mode || \"dry\").toLowerCase();\nvar confirmReal = body.confirm === true || body.confirm === \"true\";\nvar allowReal = String($env.WB_ALLOW_REAL || \"\") === \"1\";\nvar real = mode === \"real\" && confirmReal && allowReal;\nvar reason = real ? \"real\" : \"dry\";\nif (mode === \"real\" && !confirmReal) reason += \" (gate: confirm!=true)\";\nelse if (mode === \"real\" && confirmReal && !allowReal) reason += \" (gate: WB_ALLOW_REAL!=1)\";\nreturn [{ json: { real: real, mode: mode, reason: reason } }];"
+      }
+    },
+    {
+      "id": "filter-dry-0000001",
+      "name": "Filter Dry",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        700,
+        180
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "filter-dry-1",
+              "leftValue": "={{ $json.real }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "filter-real-0000001",
+      "name": "Filter Real",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        700,
+        460
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "filter-real-1",
+              "leftValue": "={{ $json.real }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "read-log-00000001",
+      "name": "Read Sent Log",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        940,
+        460
+      ],
+      "parameters": {
+        "options": {},
+        "filePath": "C:\\Users\\User\\Projects\\wb-reviews-demo\\data\\responder_log.csv"
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "parse-log-0000001",
+      "name": "Parse Sent Log",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1160,
+        460
+      ],
+      "parameters": {
+        "operation": "csv",
+        "options": {}
+      }
+    },
+    {
+      "id": "prep-items-000001",
+      "name": "Prepare Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        460
+      ],
+      "parameters": {
+        "jsCode": "// Node: Prepare Items (real path) — parse drafts CSV; skip reviewIds already sent=true (idempotency).\nvar src = $(\"Webhook\").first().json;\nvar body = src.body || src;\nif (typeof body === \"string\") { body = JSON.parse(body); }\nvar csvText = String(body.csv || \"\");\nvar lines = csvText.trim().split(\"\\n\");\nvar sentIds = {};\ntry {\n  var prev = $(\"Parse Sent Log\").all();\n  for (var p = 0; p < prev.length; p++) {\n    var r = prev[p].json;\n    if (String(r.sent).toLowerCase() === \"true\") sentIds[String(r.reviewId)] = true;\n  }\n} catch (e) { /* no previous log file — nothing sent yet */ }\nvar out = [];\nfor (var i = 1; i < lines.length; i++) {\n  var m = lines[i].match(/^\"([^\"]*)\",\"((?:[^\"]|\"\")*)\",(\\d+),\"((?:[^\"]|\"\")*)\"$/);\n  if (!m) continue;\n  var draft = m[4].replace(/\"\"/g, '\"');\n  if (!draft.trim()) continue;\n  if (sentIds[m[1]]) continue;\n  out.push({ json: { reviewId: m[1], draft: draft } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "split-batch-00001",
+      "name": "SplitInBatches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1600,
+        460
+      ],
+      "parameters": {
+        "batchSize": 10,
+        "options": {}
+      }
+    },
+    {
+      "id": "wb-answer-0000001",
+      "name": "WB answerFeedback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1820,
+        380
+      ],
+      "parameters": {
+        "url": "https://feedbacks-api.wildberries.ru/api/v1/feedbacks",
+        "method": "PATCH",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"id\": \"{{ $json.reviewId }}\", \"text\": {{ JSON.stringify($json.draft) }}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.WB_API_TOKEN}}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "responseFormat": "json"
+          }
+        }
+      }
+    },
+    {
+      "id": "wait-2s-00000001",
+      "name": "Wait 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        380
+      ],
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 2,
+        "unit": "seconds"
+      }
+    },
+    {
+      "id": "build-res-0000001",
+      "name": "Build Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1820,
+        620
+      ],
+      "parameters": {
+        "jsCode": "// Node: Build Result (done branch of the real path) — full audit log: previous rows + this run (sent=true).\nvar ts = new Date().toISOString();\nvar rows = [\"reviewId,draft,sent,dry_run,timestamp\"];\ntry {\n  var prev = $(\"Parse Sent Log\").all();\n  for (var p = 0; p < prev.length; p++) {\n    var r = prev[p].json;\n    rows.push('\"' + r.reviewId + '\",\"' + String(r.draft || \"\").replace(/\"/g, '\"\"') + '\",' + r.sent + ',' + r.dry_run + ',' + (r.timestamp || \"\"));\n  }\n} catch (e) { /* no previous log */ }\nvar sent = $(\"Prepare Items\").all();\nfor (var i = 0; i < sent.length; i++) {\n  var x = sent[i].json;\n  rows.push('\"' + x.reviewId + '\",\"' + String(x.draft).replace(/\"/g, '\"\"') + '\",true,false,' + ts);\n}\nreturn [{ json: { csv: rows.join(\"\\n\"), total: sent.length, sent: sent.length, dry_run: false, mode: \"real\" } }];"
+      }
+    },
+    {
+      "id": "conv-real-0000001",
+      "name": "Convert Real Log",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [
+        2040,
+        620
+      ],
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "csv"
+      }
+    },
+    {
+      "id": "write-real-0000001",
+      "name": "Write Real Log",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        2260,
+        620
+      ],
+      "parameters": {
+        "fileName": "C:\\Users\\User\\Projects\\wb-reviews-demo\\data\\responder_log.csv",
+        "dataPropertyName": "data",
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check Answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Answer": {
+      "main": [
+        [
+          {
+            "node": "Mode Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dry Log": {
+      "main": [
+        [
+          {
+            "node": "Convert Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Log": {
+      "main": [
+        [
+          {
+            "node": "Write Log CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Log CSV": {
+      "main": [
+        [
+          {
+            "node": "Telegram Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Result": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mode Router": {
+      "main": [
+        [
+          {
+            "node": "Filter Dry",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Filter Real",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Dry": {
+      "main": [
+        [
+          {
+            "node": "Dry Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Real": {
+      "main": [
+        [
+          {
+            "node": "Read Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Parse Sent Log",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Sent Log": {
+      "main": [
+        [
+          {
+            "node": "Prepare Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Items": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "SplitInBatches": {
+      "main": [
+        [
+          {
+            "node": "WB answerFeedback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "WB answerFeedback": {
+      "main": [
+        [
+          {
+            "node": "Wait 2s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 2s": {
+      "main": [
+        [
+          {
+            "node": "SplitInBatches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Result": {
+      "main": [
+        [
+          {
+            "node": "Convert Real Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Real Log": {
+      "main": [
+        [
+          {
+            "node": "Write Real Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Real Log": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "availableInMCP": true,
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "staticData": null,
+  "pinData": {},
+  "meta": null,
+  "tags": [],
+  "activeVersion": null
+}

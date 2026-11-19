@@ -1,0 +1,339 @@
+{
+  "id": "Iq88PYTzHEZ0sWfW",
+  "name": "WB Review Responder",
+  "description": null,
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-11-13T16:59:25.354Z",
+  "updatedAt": "2026-11-13T20:54:25.660Z",
+  "isArchived": false,
+  "versionId": "c21a01c4-2aba-4250-aed9-148ad479740a",
+  "versionCounter": 10,
+  "sourceWorkflowId": null,
+  "triggerCount": 1,
+  "nodes": [
+    {
+      "id": "wh1",
+      "name": "Webhook",
+      "webhookId": "f30d3317-8c66-46ff-99dd-206e8f0773e6",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "path": "wb-responder-demo",
+        "httpMethod": "POST",
+        "options": {}
+      }
+    },
+    {
+      "id": "http1",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        260,
+        300
+      ],
+      "parameters": {
+        "url": "https://feedbacks1.wb.ru/feedbacks/v1/115004617",
+        "method": "GET",
+        "authentication": "none",
+        "options": {
+          "headers": {
+            "User-Agent": "Mozilla/5.0"
+          },
+          "response": {
+            "responseFormat": "json"
+          }
+        }
+      }
+    },
+    {
+      "id": "flt1",
+      "name": "Filter Reviews",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Filter Reviews (code, runOnceForAllItems)\n// Input: WB feedbacks HTTP response (first item). Output: N reviews with non-empty text.\nvar body = $input.first().json.body || {};\nvar limit = Math.min(Number(body.limit || 50), 50);\nvar fb = $input.first().json.feedbacks || [];\nvar out = [];\nfor (var i = 0; i < fb.length && out.length < limit; i++) {\n  var x = fb[i];\n  var tx = String(x.text || x.pros || x.cons || \"\").trim();\n  if (!tx) continue;\n  out.push({ json: {\n    reviewId: String(x.id),\n    text: tx,\n    rating: x.productValuation || 0,\n    date: x.createdDate || \"\"\n  }});\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "prp1",
+      "name": "Build Prompts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Build Prompts (code, runOnceForAllItems -> per item)\n// Output per review: {reviewId, text, rating, date, system, user}\nvar SYSTEM = \"Ты — вежливый представитель бренда. Ответь на отзыв покупателя кратко (2-3 предложения), по-русски, без обещаний, которых нет в отзыве. Если жалоба — извинись и предложи решение. Если вопрос — ответь по существу. Если похвала — поблагодари.\";\nreturn $input.all().map(function (item) {\n  var j = item.json;\n  return { json: {\n    reviewId: j.reviewId,\n    text: j.text,\n    rating: j.rating,\n    date: j.date,\n    system: SYSTEM,\n    user: \"Отзыв (оценка \" + j.rating + \"/5): \" + j.text\n  }};\n});\n"
+      }
+    },
+    {
+      "id": "llm1",
+      "name": "LLM Call (Polza)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        300
+      ],
+      "parameters": {
+        "url": "https://polza.ai/api/v1/chat/completions",
+        "method": "POST",
+        "authentication": "none",
+        "sendBody": true,
+        "specifyBody": "json",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{$env.POLZA_API_KEY}}"
+            }
+          ]
+        },
+        "jsonBody": {
+          "model": "deepseek/deepseek-v4-flash",
+          "messages": [
+            {
+              "role": "system",
+              "content": "={{ $json.system }}"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.user }}"
+            }
+          ],
+          "max_tokens": 150,
+          "temperature": 0.3
+        },
+        "options": {
+          "response": {
+            "responseFormat": "json"
+          }
+        }
+      }
+    },
+    {
+      "id": "pair1",
+      "name": "Pair Drafts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Pair Drafts (code, runOnceForAllItems)\n// Join LLM responses (choices[0].message.content) with original review fields by index.\nvar items = $input.all();\nvar src = $(\"Build Prompts\").all();\nvar out = [];\nfor (var idx = 0; idx < items.length; idx++) {\n  var j = items[idx].json;\n  var orig = (src[idx] && src[idx].json) || {};\n  var draft = \"\";\n  if (j.choices && j.choices[0] && j.choices[0].message) draft = String(j.choices[0].message.content || \"\").trim();\n  out.push({ json: {\n    reviewId: orig.reviewId,\n    text: orig.text,\n    rating: orig.rating,\n    date: orig.date,\n    draftAnswer: draft\n  }});\n}\nreturn out;\n"
+      }
+    },
+    {
+      "id": "bld1",
+      "name": "Build Drafts CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// Node: Build Drafts CSV (code, runOnceForAllItems) — WF1 tail\n// Input: paired items {reviewId, text, rating, date, draftAnswer}. Output: one item {csv, summary}.\nvar items = $input.all();\nvar rows = [\"reviewId,text,rating,draftAnswer\"];\nvar empty = 0;\nfor (var i = 0; i < items.length; i++) {\n  var j = items[i].json;\n  var draft = String(j.draftAnswer || \"\").trim();\n  if (!draft) empty++;\n  rows.push('\"' + j.reviewId + '\",\"' + String(j.text || \"\").replace(/\"/g, '\"\"') + '\",' + (j.rating || 0) + ',\"' + draft.replace(/\"/g, '\"\"') + '\"');\n}\nvar first = items[0] && items[0].json ? items[0].json.draftAnswer : \"\";\nreturn [{ json: {\n  csv: rows.join(\"\\n\"),\n  summary: \"WB Review Responder: черновики готовы — \" + items.length + \" шт. (пустых: \" + empty + \"). Пример: «\" + String(first).slice(0, 120) + \"». Отправить ответы? Ответь «да» оператору.\"\n}}];\n"
+      }
+    },
+    {
+      "id": "cnv1",
+      "name": "Convert to File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [
+        1780,
+        300
+      ],
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "csv"
+      }
+    },
+    {
+      "id": "wr1",
+      "name": "Write Drafts CSV",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [
+        2000,
+        300
+      ],
+      "parameters": {
+        "operation": "write",
+        "fileName": "C:/Users/User/Projects/wb-reviews-demo/data/responder_drafts.csv",
+        "dataPropertyName": "data"
+      }
+    },
+    {
+      "id": "tg1",
+      "name": "Telegram Approval",
+      "webhookId": "c1e38c50-6ca7-472b-9f9e-2a651e75b752",
+      "disabled": true,
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2220,
+        300
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{$env.TELEGRAM_HOME_CHANNEL}}",
+        "text": "={{ $('Build Drafts CSV').first().json.summary }}",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "RR5DeKtrRuDsKDe1",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "id": "end1",
+      "name": "End",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2440,
+        300
+      ],
+      "parameters": {}
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Filter Reviews",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Reviews": {
+      "main": [
+        [
+          {
+            "node": "Build Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Prompts": {
+      "main": [
+        [
+          {
+            "node": "LLM Call (Polza)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Call (Polza)": {
+      "main": [
+        [
+          {
+            "node": "Pair Drafts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pair Drafts": {
+      "main": [
+        [
+          {
+            "node": "Build Drafts CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Drafts CSV": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Write Drafts CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Drafts CSV": {
+      "main": [
+        [
+          {
+            "node": "Telegram Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Approval": {
+      "main": [
+        [
+          {
+            "node": "End",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "availableInMCP": true
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "activeVersion": null
+}

@@ -1,0 +1,46 @@
+{
+  "date": "2026-11-14",
+  "feature": "WB Review Responder (human-in-the-loop answers)",
+  "mode": "dry_run (WB_API_TOKEN not set). WF2 implements stateless dry-run confirm: after explicit operator approval an audit log is written with sent=false, dry_run=true; nothing is published to WB. Real-send branch is planned for the next iteration.",
+  "product": "Бандана хлопковая (WB nmId=165462535, imtId=115004617)",
+  "workflows": {
+    "wf1": "WB Review Responder (Iq88PYTzHEZ0sWfW): webhook→feedbacks→filter50→prompts→Polza→pair→csv→[Telegram disabled]",
+    "wf2": "WB Responder Confirm (pooBWAs7FVs1B8E1): webhook{answer,csv}→check→drylog→csv→[Telegram disabled] — stateless dry-run confirm only, no real-send branch in graph"
+  },
+  "reviews_fetched": 50,
+  "drafts_generated": 50,
+  "drafts_nonempty": 50,
+  "approvals": {
+    "request": "delivered here (api.telegram.org unreachable from host: 000 timeout; Hermes bot send also timeout)",
+    "user_confirm": "да (explicit, dry-run)"
+  },
+  "confirm_results": {
+    "log_rows": 50,
+    "sent": 0,
+    "dry_run": true,
+    "file": "data/responder_log.csv"
+  },
+  "timing": {
+    "wf1_seconds": 3.8,
+    "wf2_seconds": 0.07,
+    "note": "drafts+log under 4s total; LLM ~80ms/review"
+  },
+  "llm": "Polza deepseek/deepseek-v4-flash (max_tokens 150, temp 0.3)",
+  "rate_limit_plan": "planned next iteration: real-send branch with SplitInBatches(10)+Wait 2s = under 3 req/s. NOT present in the current WF2 graph.",
+  "code_mode": {
+    "verify_chain": "5 setNodeCode + 5 verifyNodeCode match:true",
+    "exec_log": "exec.log records create/verify/activate"
+  },
+  "repairs": [
+    "Telegram unreachable (000) → nodes disabled, delivery here",
+    "LLM empty draft on 1-star review → operator retry",
+    "body.csv access via ",
+    "double-comma CSV patch",
+    "IF → Code checker for body variants"
+  ],
+  "honest_caveats": [
+    "approval delivered in chat, not Telegram (network block)",
+    "1 draft completed by operator retry after LLM empty output",
+    "real WB sending requires seller token (feedbacks:write)"
+  ]
+}

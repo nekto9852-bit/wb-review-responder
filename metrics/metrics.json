@@ -1,0 +1,52 @@
+{
+  "date": "2026-11-13",
+  "product": "Бандана хлопковая (WB nmId=165462535, imtId=115004617)",
+  "total_feedbacks_available": 10611,
+  "reviews_processed": 100,
+  "pipeline_wall_seconds": 8.1,
+  "executions": [
+    {
+      "id": 406,
+      "status": "success",
+      "sec": 3.3,
+      "note": "частичные тексты"
+    },
+    {
+      "id": 407,
+      "status": "success",
+      "sec": 5
+    },
+    {
+      "id": "final",
+      "status": "success",
+      "sec": 8.1,
+      "note": "после фильтра текстов"
+    }
+  ],
+  "categories": {
+    "pohvala": 76,
+    "zhaloba": 0,
+    "vopros": 24
+  },
+  "sentiments": {
+    "positive": 76,
+    "negative": 0,
+    "neutral": 24
+  },
+  "baseline_manual": {
+    "minutes_estimate": 120,
+    "note": "экспертная оценка: 100 отзывов вручную (чтение+разметка+таблица) ~2ч"
+  },
+  "speedup": "~120 мин вручную (оценка) → 8.1 с автоматически ≈ 880×",
+  "llm": "Polza deepseek/deepseek-v4-flash (~80мс/отзыв)",
+  "stack": [
+    "n8n 2.44.5 (webhook+http+code+convertToFile+writeBinaryFile)",
+    "Code Mode MCP (Hermes)",
+    "Hermes Agent pipeline"
+  ],
+  "repairs": 5,
+  "notes": [
+    "LLM иногда добавлял префиксы category=/sentiment= — почищено пост-обработкой (6 строк)",
+    "zhaloba=0 правдоподобно: рейтинг товара 4.8; ~24 «вопросов» — часть спорных размечок flash-модели (честная оговорка README)"
+  ]
+}
